@@ -14,17 +14,22 @@ wget -O factorio_update_server.sh $DOWNLOAD_URL
 ```
 
 ## start the update script
-if you don't have an authentication token, use
-```bash
-sudo bash factorio_update_server.sh -u "username" -p "password"
+<!-- reading options from a file  
+create a `.properties` file with following contents  
+
+```properties
+USERNAME="Username"
+AUTH_TOKEN="ReplaceWithActualToken"
 ```
-replace `username` and `password` with the credentials used by `factorio.com`  
+and then start the update script with these options
+```bash
+sudo bash factorio_update_server.sh -f "/path/to/.properties"
+```
 
 <hr>
-
-if you have already an authentication token, can be re-used from previous calls, run
-
+  
+you can also pass those options directly through some flags-->
 ```bash
 sudo bash factorio_update_server.sh -u "username" -t "token"
 ```
-replace `username` and `token`
+replace `username` and `token` with your username and token used by `factorio.com`  

@@ -6,7 +6,7 @@ if [ "$(id -u)" -ne 0 ]
   exit 1;
 fi
 
-echo -e "\033[1;33mPlease make an backup before you continue!\e[0m"
+echo -e "\033[1;33mPlease make an backup before you start the update!\e[0m"
 read -r -p "Are you sure you want to continue? (y|n): " response
 response=${response,,}    # tolower
 if [[ ! "$response" =~ ^(yes|y)$ ]]
@@ -25,18 +25,17 @@ if [ ! -f "$FILE_NAME" ]; then
   echo -e "\e[1;31mCan not read version from current installation, \033[1;37m$FILE_NAME\e[1;31m does not exist\e[0m"
   exit 1;
 else
-  VERSION=$(cat $FILE_NAME | python3 -c "import sys, json; print(json.load(sys.stdin)['version'])")
+  VERSION=$(cat $FILE_NAME | python3 -I -c "import sys, json; print(json.load(sys.stdin)['version'])")
 fi
 
 echo -e "\e[1;36mFound existing Factorio Version: \e[0m$VERSION"
 
 # read input flags
-while getopts u:p:t: flag
+while getopts u:t: flag
 do
   case "${flag}" in
     u) USERNAME="${OPTARG}";;
-    p) PASSWORD="${OPTARG}";;
-    t) TOKEN="${OPTARG}";;
+    t) AUTH_TOKEN="${OPTARG}";;
   esac
 done
 
@@ -48,45 +47,31 @@ if [ -z "$USERNAME" ]; then
 fi
 echo -e "\e[1;36mUsername: \e[0m$USERNAME";
 
+# url encode username
+USERNAME=$(python3 -c "import urllib.parse; print(urllib.parse.quote(\"$USERNAME\"))")
+
 # check if token is empty, try getting one with the password
-if [ -z "$TOKEN" ]; then
-
-  # check if password is empty
-  if [ -z "$PASSWORD" ]; then
+if [ -z "$AUTH_TOKEN" ]; then
     echo ""
-    echo -e "\e[1;31mPlease specify your password with '-p \"password\"'\e[0m"
+    echo -e "\e[1;31mPlease specify your auth-token with '-t \"token\"'\e[0m"
     exit 1
-  fi
-
-  echo -e "\e[1;36mPassword: \e[0m********************";
-
-  # get auth token
-  AUTH_URL="https://auth.factorio.com/api-login"
-  TOKEN=$(curl $AUTH_URL -s -f -F "username=$USERNAME" -F "password=$PASSWORD")
-
-  # check if token is empty
-  if [ -z "$TOKEN" ]; then
-    echo ""
-    echo -e "\e[1;31mCan not authenticate, make sure you are using the correct username and password\e[0m"
-    exit 1
-  fi
-
-  # remove leading and trailing brackets
-  TOKEN=${TOKEN:2:-2}
-  echo -e "\e[1;36mGot authentication token from API: \e[0m$TOKEN"
-
 else
-  echo -e "\e[1;36mToken: \e[0m$TOKEN";
+  echo -e "\e[1;36mToken: \e[0m********************";
 fi
 
 
 # get all available versions and parse through python
-UPDATES_URL="https://updater.factorio.com/get-available-versions?username=$USERNAME&token=$TOKEN"
-NEEDED_UPDATES=$(curl -s -f $UPDATES_URL | python3 -c "
+UPDATES_URL="https://updater.factorio.com/get-available-versions?username=$USERNAME&token=$AUTH_TOKEN"
+
+NEEDED_UPDATES=$(curl -s "$UPDATES_URL" | python3 -I -c "
 import sys, json;
 from pkg_resources import parse_version as version;
 lower='$VERSION'
-all_versions=json.load(sys.stdin)['$PACKAGE']
+loaded=json.load(sys.stdin)
+if 'message' in loaded and 'status' in loaded:
+  print(loaded)
+  sys.exit(5)
+all_versions=loaded['$PACKAGE']
 upper=[x for x in all_versions if 'stable' in x][0]['stable']
 output=[]
 for i in range(0, len(all_versions)):
@@ -96,6 +81,12 @@ for i in range(0, len(all_versions)):
       output.append('&from='+upgrade['from']+'&to='+upgrade['to'])
 print(' '.join(output))
 ")
+
+if [[ $? -ne 0 ]]; then
+  echo ""
+  echo -e "\e[1;31mCould not get available updates from API, answer:\e[0m $NEEDED_UPDATES"
+  exit 1
+fi
 
 # check if there are any new updates available
 if [ -z "$NEEDED_UPDATES" ]; then
@@ -125,20 +116,23 @@ mkdir -p $TMP_FOLDER
 cd $TMP_FOLDER
 rm -rf "update-*"
 
-BASE_URL="https://updater.factorio.com/get-download-link?username=$USERNAME&token=$TOKEN&package=$PACKAGE"
+DOWNLOAD_UPDATES_URL="https://updater.factorio.com/get-download-link?username=$USERNAME&token=$AUTH_TOKEN&package=$PACKAGE"
 echo -e "\e[1;36mStarting downloads\e[0m"
+
+# collect all files names in this variable
 FILES=""
 
 # download each file
 for OUTPUT in $NEEDED_UPDATES
 do
-  LINK=$(curl -s -f "$BASE_URL$OUTPUT")
-  LINK=${LINK:2:-2}
+  # get file link from api
+  LINK_TO_UPDATE=$(curl -s -f "$DOWNLOAD_UPDATES_URL$OUTPUT")
+  LINK_TO_UPDATE=${LINK:2:-2}
   TMP=${OUTPUT//[\&=]/-}
   UPDATE_FILE="update$TMP.zip"
   FILES+=" $UPDATE_FILE"
   echo -e "\e[1;36mDownloading file: \e[0m$UPDATE_FILE"
-  wget -O $UPDATE_FILE -q $LINK
+  wget -O $UPDATE_FILE -q $LINK_TO_UPDATE
 done
 
 echo -e "\e[1;36mDownloads finished\e[0m"
